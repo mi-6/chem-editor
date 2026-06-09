@@ -1,30 +1,69 @@
-# MolVis Editor Module
+# Chem Editor Module
 
 ## 1. Module Overview
 
-The MolVis Editor module is responsible for creating, editing, and validating small-molecule structures inside the MolVis workspace. It accepts SMILES strings, MDL molfiles, or structures drawn in Ketcher, validates them locally and against the MolVis backend, and produces a normalized `StructurePayload` (`smiles` + `molfile`) that other modules (visualization, generation, retrosynthesis) can consume. It does not perform property prediction, 3D rendering, or synthesis planning on its own.
+The Chem Editor module provides a standalone molecule editing workspace for small molecules. It accepts SMILES strings, MDL MOL blocks, or structures created in the built-in 2D sketch surface, and produces a normalized `StructurePayload` containing the current SMILES and/or molfile representation. The module is responsible only for structure entry, editing, fragment insertion, local preview, and sync callbacks; prediction, 3D visualization, generation, and retrosynthesis belong to separate modules.
 
 ## 2. Interface Definition
 
-### Frontend components (React)
+### Feature Requirements Checklist
 
-All components live under `client/` and are imported in the host app via the `@editor/*` path alias.
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Accept SMILES string as input | Supported | Paste or type SMILES in the editor input or load through `acceptedSmiles`. |
+| Import MOL format | Supported | Paste a V2000/V3000 molfile block into the editor. |
+| Import SDF format | Partial | Single-molecule mol blocks work; multi-record SDF import is not implemented. |
+| Draw molecule structures manually | Supported | `StructureEvidenceEditor` provides atom, bond, fragment, zoom, delete, and clear controls. |
+| Render molecule as 2D diagram | Supported | The standalone app uses local SVG previews; host integrations can replace them with backend-rendered SVG. |
+| Display atom labels | Supported | Sketch atoms render element labels; generated SVG depends on the renderer used by the host or shim. |
+| Highlight atoms or bonds | Supported | Fragment highlighting is exposed through `moleculeService.highlightSubstructure`. |
+| Export 2D structure as image | Not implemented | No direct image export button is included in this module. |
+| Navigate to 3D view | Not implemented | This module emits structure data; a host app must wire navigation to a 3D module. |
+| Real-time 2D to 3D sync | Not implemented | Sync callbacks are available, but no 3D viewer is included here. |
+
+### Standalone App
+
+The standalone app is the entry point for this repository.
+
+| Item | Value |
+|------|-------|
+| Root component | `src/App.tsx` |
+| Browser entry | `src/main.tsx` |
+| Local service shim | `src/services/moleculeService.ts` |
+| Dev command | `npm run dev` |
+| Default local URL | `http://127.0.0.1:5174` |
+| Build command | `npm run build` |
+
+The standalone app opens directly to the editor. It has no account gate or external workspace dependency.
+
+### React Components
 
 | Export | File | Purpose |
 |--------|------|---------|
-| `EditorPage` | `client/EditorPage.tsx` | Full-page editor route (`/editor`) with command input and structure canvas |
-| `StructureEditorPanel` | `client/StructureEditorPanel.tsx` | Text-based SMILES / molfile editor with sync callbacks |
-| `StructureEvidenceEditor` | `client/StructureEvidenceEditor.tsx` | Rich editor with SHAP overlay support, file paste, and sync controls |
-| `KetcherEditorPanel` | `client/KetcherEditorPanel.tsx` | Modal Ketcher drawing surface with live 2D preview |
-| `WorkspaceEditorHandle` | `client/StructureEditorPanel.tsx` | Imperative ref API: `loadStructure`, `exportStructure`, `clear` |
+| `StructureEvidenceEditor` | `client/StructureEvidenceEditor.tsx` | Primary rich editor used by the standalone app. |
+| `StructureEditorPanel` | `client/StructureEditorPanel.tsx` | Text-first SMILES/molfile editor with an imperative ref API. |
+| `EditorPage` | `client/EditorPage.tsx` | Host-page editor that expects shared workspace and command APIs. |
+| `KetcherEditorPanel` | `client/KetcherEditorPanel.tsx` | Ketcher-based drawing panel for host integrations. |
+| `WorkspaceEditorHandle` | `client/StructureEditorPanel.tsx` | Ref API for loading, exporting, and clearing structure state. |
 
-#### `StructurePayload` (shared output type)
+### Input Formats
 
-```typescript
-interface StructurePayload {
-  smiles: string;    // Canonical or user-entered SMILES
-  molfile: string;   // MDL mol block (V2000/V3000)
-  designEdit?: {     // Optional fragment-edit metadata
+| Format | Accepted By | Example | Notes |
+|--------|-------------|---------|-------|
+| SMILES string | `acceptedSmiles`, editor input, `loadStructure()` | `CCO` | Whitespace is trimmed and the first token is used. |
+| MDL MOL block | Editor input, `loadStructure()` | V2000 or V3000 block | Detected by `V2000`, `V3000`, or `M  END`. |
+| Sketch state | `StructureEvidenceEditor` canvas | User-drawn atoms and bonds | Converted to an internal V2000 molfile before syncing. |
+| Fragment SMILES | Fragment input | `O`, `CCO`, `[*:1]O[*:2]` | Used for highlight and insertion workflows. |
+
+### Output: `StructurePayload`
+
+All sync points use the same output shape.
+
+```ts
+export interface StructurePayload {
+  smiles: string;
+  molfile: string;
+  designEdit?: {
     afterSmiles: string;
     beforeSmiles: string;
     beforeMolfile?: string;
@@ -33,126 +72,124 @@ interface StructurePayload {
 }
 ```
 
-#### Component props
+| Field | Meaning |
+|-------|---------|
+| `smiles` | Current molecule as a SMILES string when available. |
+| `molfile` | Current molecule as an MDL molfile when available. |
+| `designEdit` | Optional metadata when a fragment insertion creates a before/after edit. |
 
-**`StructureEditorPanel`**
-
-| Prop | Type | Required | Description |
-|------|------|----------|-------------|
-| `onStructureChange` | `(payload: StructurePayload) => void \| Promise<void>` | Yes | Called whenever the user edits the structure |
-| `acceptedSmiles` | `string` | No | Last validated SMILES shown as confirmation |
-| `explainOverlaySvg` | `string \| null` | No | Optional SVG overlay (e.g. atom contribution heatmap) |
-| `invalidMessage` | `string \| null` | No | External validation error to display |
-
-**`KetcherEditorPanel`**
+### `StructureEvidenceEditor` Props
 
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
-| `smiles` | `string` | Yes | Initial structure |
-| `onCancel` | `() => void` | Yes | Close handler |
-| `onPreviewArtifact` | `(artifact: WorkspaceArtifact) => void` | Yes | Push preview artifact to workspace |
-| `onApplyMolecule` | `(payload: { smiles: string; molfile: string }) => void` | No | Apply drawn structure to workspace |
+| `acceptedSmiles` | `string` | Yes | Initial or externally accepted SMILES. |
+| `onOpenStructureFile` | `() => void` | Yes | Called when the user selects the upload action. |
+| `onSyncStructure` | `(payload: StructurePayload) => void \| Promise<void>` | No | Called when the current structure should be synced outward. |
+| `structureSvg` | `string \| null` | No | Optional pre-rendered structure SVG. |
+| `heatmapSvg` | `string \| null` | No | Optional atom-contribution SVG overlay. |
+| `invalidMessage` | `string \| null` | No | External validation message. |
+| `shapProperty` | `'tpsa' \| 'logp' \| 'molecular_weight' \| 'hbd' \| 'hba'` | No | Selected atom-contribution property label. |
+| `shapRawContributions` | `number[]` | No | Optional atom-level contribution values. |
+| `shapStatus` | `'idle' \| 'running' \| 'ready' \| 'error'` | No | Status of the contribution overlay. |
+| `shapError` | `string \| null` | No | Contribution overlay error text. |
 
-### Local chemistry service (`client/ketcherService.ts`)
+### `StructureEditorPanel` Ref API
 
-Browser-side conversions using Ketcher Standalone (no server round-trip required):
+```ts
+export interface WorkspaceEditorHandle {
+  clear: () => Promise<void>;
+  exportStructure: () => Promise<StructurePayload>;
+  loadStructure: (structure: string) => Promise<void>;
+}
+```
 
-| Function | Input | Output | Description |
-|----------|-------|--------|-------------|
-| `smilesToMolfile(smiles)` | SMILES string | MDL molfile string | Convert SMILES → mol |
-| `molfileToSmiles(molfile)` | MDL molfile | SMILES string | Convert mol → canonical SMILES |
-| `cleanMolfile(molfile)` | MDL molfile | MDL molfile | Ketcher structure cleanup |
-| `checkMolfile(molfile)` | MDL molfile | Validation map | Checks valence, overlaps, pseudoatoms |
+Use this API when a parent component needs to load a structure programmatically, pull the current editor state, or clear the editor.
 
-### Host-app dependencies
+### Local Service Contract
 
-This module expects the following from the MolVis host application (not included in this repo):
+The standalone app provides `src/services/moleculeService.ts` so the editor can run without a host backend.
 
-| Dependency | Path alias | Used for |
-|------------|------------|----------|
-| API client | `@/services/api` | Optional host HTTP calls |
-| Molecule service | `@/services/moleculeService` | `analyzeWorkspace()` for 2D SVG + molfile validation |
-| Command executor | `@/lib/commandExecutor` | Natural-language edit commands on `EditorPage` |
-| Workspace hooks | `@/features/chat/hooks/useMoleculeWorkspaceState` | Shared molecule context on `EditorPage` |
-| SVG sanitizer | `@/lib/sanitize` | Safe SVG rendering |
+| Function | Input | Output | Purpose |
+|----------|-------|--------|---------|
+| `analyzeWorkspace(payload)` | `{ smiles?, molfile? }` | `{ smiles, molfile, structure_2d }` | Normalizes the structure and returns a preview SVG. |
+| `highlightSubstructure(smiles, query, options?)` | Target structure and fragment query | Match counts, matched atoms, SVG previews | Drives fragment highlight feedback. |
+| `insertFragment(payload)` | Fragment insertion request | `{ smiles, molfile, fragment_label, selected_bond_index }` | Updates the current structure with a fragment. |
 
-### Backend
-
-The editor module has no dedicated server code in this repository. Structure validation and 2D SVG generation are delegated to the host MolVis API (`POST /api/v1/molecules/analyze` or equivalent workspace analyze endpoint via `moleculeService.analyzeWorkspace`).
+Host applications can replace this shim with a chemistry backend as long as the same function names and response shapes are preserved.
 
 ## 3. Usage Example
 
-### Minimal integration — text editor panel
+### Run the standalone editor
+
+```bash
+npm install
+npm run dev -- --port 5174
+```
+
+Open:
+
+```text
+http://127.0.0.1:5174
+```
+
+Expected result: the page displays `Chem Editor`, a molecule sketch surface, atom and bond controls, a fragment input, and sync controls. It opens directly to the editor.
+
+### Embed the rich editor in another React app
 
 ```tsx
 import { useState } from 'react';
-import { StructureEditorPanel, type StructurePayload } from '@editor/StructureEditorPanel';
+import { StructureEvidenceEditor } from './client/StructureEvidenceEditor';
+import type { StructurePayload } from './client/StructureEditorPanel';
 
-export function MyEditorHost() {
-  const [structure, setStructure] = useState<StructurePayload>({ smiles: '', molfile: '' });
+export function EditorHost() {
+  const [smiles, setSmiles] = useState('CCO');
+
+  async function syncStructure(payload: StructurePayload) {
+    setSmiles(payload.smiles || smiles);
+    console.log(payload);
+  }
 
   return (
-    <StructureEditorPanel
-      acceptedSmiles={structure.smiles}
-      onStructureChange={async (payload) => {
-        setStructure(payload);
-        // payload.smiles and payload.molfile are ready for downstream modules
-      }}
+    <StructureEvidenceEditor
+      acceptedSmiles={smiles}
+      onOpenStructureFile={() => console.log('open file picker')}
+      onSyncStructure={syncStructure}
+      shapProperty="logp"
     />
   );
 }
 ```
 
-**Expected result:** Typing `CC(=O)Oc1ccccc1C(=O)O` (aspirin) into the SMILES field triggers `onStructureChange` with a populated `smiles` field. After backend validation, `acceptedSmiles` reflects the canonical form.
-
-### Ketcher draw flow
-
-```tsx
-import { KetcherEditorPanel } from '@editor/KetcherEditorPanel';
-
-<KetcherEditorPanel
-  smiles="c1ccccc1"
-  onCancel={() => setOpen(false)}
-  onPreviewArtifact={(artifact) => workspace.pushArtifact(artifact)}
-  onApplyMolecule={({ smiles, molfile }) => {
-    setCurrentStructure({ smiles, molfile });
-    setOpen(false);
-  }}
-/>
-```
-
-**Expected result:** User draws benzene in Ketcher, sees a live 2D SVG preview, and on apply receives `{ smiles: 'c1ccccc1', molfile: '...' }`.
+Expected result: the editor loads ethanol (`CCO`). When the user draws or syncs a structure, `syncStructure` receives the current `StructurePayload`.
 
 ## 4. How to Extend
 
-### Add a new input mode (e.g. SDF paste)
+### Add a new supported input format
 
-1. Edit `client/StructureEditorPanel.tsx` — add detection logic in `detectMode()` and parsing in `toPayload()`.
-2. Do **not** change the `StructurePayload` shape without updating downstream consumers (visualization, generator).
-3. If conversion requires server-side parsing, call `moleculeService` rather than adding backend code to this repo.
+Touch `client/StructureEditorPanel.tsx` if the format can be represented as text. Update `isMolfile`, `detectMode`, and `toPayload` so the new format is converted into `StructurePayload`. Leave `StructurePayload` stable unless every downstream module is updated at the same time.
 
-### Add Ketcher toolbar actions
+### Add new sketch controls
 
-1. Edit `client/KetcherEditorPanel.tsx` — add UI controls and wire them through `ketcherService.ts`.
-2. Keep all Ketcher Standalone calls in `ketcherService.ts` so the panel stays a thin UI layer.
+Touch `client/StructureEvidenceEditor.tsx`. Add controls near the existing atom palette, bond order buttons, or fragment library depending on the workflow. Preserve the existing `onSyncStructure` behavior so parent apps still receive a `StructurePayload`.
 
-### Add editor commands (natural language)
+### Replace the standalone chemistry shim with a backend
 
-1. Edit command patterns in the **host app** at `client/src/lib/commandExecutor.ts` (not in this repo).
-2. `EditorPage.tsx` already calls `createLocalCommandPlan` / `executeCommandPlan` — extend the host command DSL, not the editor components directly.
+Touch `src/services/moleculeService.ts`. Keep the function names and response fields the same. Replace the mock SVG and fragment behavior with HTTP calls or a chemistry library. Do not change `StructureEvidenceEditor` just to swap service implementations.
 
-### Conventions
+### Add image export
 
-- All new exports must be re-exported through the host app's Vite alias `@editor/*`.
-- Props callbacks should accept `StructurePayload`, never raw strings alone.
-- Always sanitize SVG content with `@/lib/sanitize` before rendering.
+Add a command in `StructureEvidenceEditor` that serializes the active SVG or sketch canvas into a downloadable PNG or SVG file. Keep export logic isolated in a utility so it can be reused by future visualization modules.
+
+### Add 2D to 3D navigation
+
+Do not add a 3D viewer inside this module. Instead, emit the latest `StructurePayload` through `onSyncStructure`, then let the host router or shell navigate to the 3D module with that payload.
 
 ## 5. Known Limitations
 
-- **Standalone shell included.** The Vite app in `src/` opens directly to the editor with local service shims. The host integration path still supports richer shared workspace behavior.
-- **No dedicated backend** in this repository. Molfile generation for complex structures depends on the host `moleculeService`.
-- **File upload on EditorPage** is stubbed (`onOpenStructureFile` shows a placeholder message). File import works in `StructureEvidenceEditor` via paste, not a full file-picker workflow on the dedicated editor page.
-- **SDF multi-molecule files** are not supported; only single-structure SMILES/molfile input is handled.
-- **Ketcher bundle size** is large (~20 MB). Lazy-load `KetcherEditorPanel` in the host app (already done in `ChatWorkspacePage`).
-- **Real-time 2D → 3D sync** is not implemented inside this module; navigation to the visualization module must be wired in the host app.
-- **Server-side editor routes** do not exist; all editing is client-side with optional backend validation.
+- Multi-record SDF import is not implemented.
+- Image export is not implemented.
+- No 3D renderer is included in this repository.
+- Real-time 2D to 3D synchronization requires a separate host or visualization module.
+- The standalone service shim is designed for local interaction and preview, not chemically rigorous validation.
+- Ketcher integration exists in `client/KetcherEditorPanel.tsx`, but the standalone app currently uses `StructureEvidenceEditor`.
+- Server-side routes are not included in this repository.
