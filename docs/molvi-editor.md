@@ -70,7 +70,7 @@ This module expects the following from the MolVis host application (not included
 
 | Dependency | Path alias | Used for |
 |------------|------------|----------|
-| API client | `@/services/api` | Authenticated HTTP |
+| API client | `@/services/api` | Optional host HTTP calls |
 | Molecule service | `@/services/moleculeService` | `analyzeWorkspace()` for 2D SVG + molfile validation |
 | Command executor | `@/lib/commandExecutor` | Natural-language edit commands on `EditorPage` |
 | Workspace hooks | `@/features/chat/hooks/useMoleculeWorkspaceState` | Shared molecule context on `EditorPage` |
@@ -149,7 +149,7 @@ import { KetcherEditorPanel } from '@editor/KetcherEditorPanel';
 
 ## 5. Known Limitations
 
-- **Not standalone.** Requires the MolVis host app for routing, auth, API, and shared UI primitives (`@/` imports).
+- **Standalone shell included.** The Vite app in `src/` opens directly to the editor with local service shims. The host integration path still supports richer shared workspace behavior.
 - **No dedicated backend** in this repository. Molfile generation for complex structures depends on the host `moleculeService`.
 - **File upload on EditorPage** is stubbed (`onOpenStructureFile` shows a placeholder message). File import works in `StructureEvidenceEditor` via paste, not a full file-picker workflow on the dedicated editor page.
 - **SDF multi-molecule files** are not supported; only single-structure SMILES/molfile input is handled.

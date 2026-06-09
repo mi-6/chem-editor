@@ -4,6 +4,17 @@
 
 MolVis structure editor module — SMILES/molfile input, Ketcher drawing, and structure validation.
 
+## Standalone app
+
+```bash
+npm install
+npm run dev
+```
+
+Local app: `http://127.0.0.1:5174`
+
+The standalone app opens directly to the editor. No sign-in flow is included.
+
 ## Documentation
 
 Full module documentation (interface, usage, extension guide, limitations):
@@ -14,6 +25,7 @@ Full module documentation (interface, usage, extension guide, limitations):
 
 ```
 client/   React components (EditorPage, KetcherEditorPanel, StructureEditorPanel, …)
+src/      Standalone Vite app wrapper and local service shims
 docs/     Module documentation
 ```
 

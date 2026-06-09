@@ -1,0 +1,15 @@
+:root {
+  --molvis-bg: #f6f7fb;
+  --molvis-text: #142033;
+  --molvis-muted: #637083;
+  --molvis-accent: #2958ff;
+  --molvis-accent-strong: #1f46d8;
+  --molvis-border-soft: rgba(20, 32, 51, 0.1);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
