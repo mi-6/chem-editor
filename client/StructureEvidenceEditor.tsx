@@ -90,6 +90,21 @@ function getShapPropertyLabel(value: AtomContributionPropertyName) {
   return shapProperties.find((property) => property.value === value)?.label || value;
 }
 
+function formatContributionSummary(
+  contributions: Array<{ atom_index: number; normalized: number; raw: number }> | undefined,
+) {
+  if (!contributions?.length) {
+    return 'no atom contribution values returned';
+  }
+
+  return contributions
+    .slice()
+    .sort((left, right) => Math.abs(right.raw) - Math.abs(left.raw))
+    .slice(0, 3)
+    .map((item) => `atom ${item.atom_index}: ${item.raw.toFixed(3)}`)
+    .join(', ');
+}
+
 const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
 const MIN_CANVAS_SCALE = 0.55;
 const MAX_CANVAS_SCALE = 2.4;
@@ -759,13 +774,15 @@ export const StructureEvidenceEditor = forwardRef<
       });
 
       if (result.num_matches > 0) {
+        const source = 'source' in result ? `${result.source}: ` : '';
         setFragmentStatus(
-          `${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}.`,
+          `${source}${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}. Top values: ${formatContributionSummary(result.matched_contributions)}.`,
         );
         return;
       }
 
-      setFragmentStatus(`${getShapPropertyLabel(shapProperty)} view: no matches found for ${query} on the current molecule.`);
+      const source = 'source' in result ? `${result.source}: ` : '';
+      setFragmentStatus(`${source}${getShapPropertyLabel(shapProperty)} view: no matches found for ${query} on the current molecule.`);
     } catch (highlightError) {
       if (requestId !== highlightRequestRef.current) {
         return;
