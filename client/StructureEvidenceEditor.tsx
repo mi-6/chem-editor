@@ -243,6 +243,31 @@ function parseMolfileSketch(molfile: string): { atoms: SketchAtom[]; bonds: Sket
   return { atoms, bonds };
 }
 
+function sketchFromSmiles(smiles: string): { atoms: SketchAtom[]; bonds: SketchBond[] } | null {
+  const tokens = normalizeSmiles(smiles).match(/Br|Cl|[A-Z][a-z]?/g) || [];
+  const elements = tokens.filter((token) => atomPalette.includes(token) || ['P', 'I'].includes(token));
+  if (!elements.length) {
+    return null;
+  }
+
+  const spacing = 70;
+  const startX = 420 - ((elements.length - 1) * spacing) / 2;
+  const atoms = elements.map((element, index) => ({
+    element,
+    id: index + 1,
+    x: startX + index * spacing,
+    y: 320,
+  }));
+  const bonds = atoms.slice(1).map((atom, index) => ({
+    from: atoms[index].id,
+    id: index + 1,
+    order: smiles.includes('=') && index === 0 ? 2 as BondOrder : 1 as BondOrder,
+    to: atom.id,
+  }));
+
+  return { atoms, bonds };
+}
+
 function getSvgPoint(event: React.MouseEvent<SVGSVGElement> | React.WheelEvent<SVGSVGElement>) {
   const rect = event.currentTarget.getBoundingClientRect();
   return {
@@ -497,6 +522,24 @@ export const StructureEvidenceEditor = forwardRef<
     setSketchDirty(false);
   };
 
+  const loadSketchFromSmiles = (smiles?: string) => {
+    const parsed = smiles ? sketchFromSmiles(smiles) : null;
+    if (!parsed) {
+      setSketchAtoms([]);
+      setSketchBonds([]);
+      setSelectedAtomId(null);
+      setSelectedBondId(null);
+      setSketchDirty(false);
+      return;
+    }
+
+    setSketchAtoms(parsed.atoms);
+    setSketchBonds(parsed.bonds);
+    setSelectedAtomId(parsed.atoms[0]?.id || null);
+    setSelectedBondId(null);
+    setSketchDirty(false);
+  };
+
   const loadStructure = async (structure: string) => {
     const isMol = isMolfile(structure);
     const cleaned = isMol ? structure : structure.trim();
@@ -517,10 +560,18 @@ export const StructureEvidenceEditor = forwardRef<
     try {
       const analyzed = await analyzePayload(payload);
       setCurrentPayload(analyzed.payload);
-      loadSketchFromMolfile(analyzed.payload.molfile);
+      if (analyzed.payload.molfile) {
+        loadSketchFromMolfile(analyzed.payload.molfile);
+      } else {
+        loadSketchFromSmiles(analyzed.payload.smiles);
+      }
     } catch {
       setCurrentPayload(payload);
-      loadSketchFromMolfile(payload.molfile);
+      if (payload.molfile) {
+        loadSketchFromMolfile(payload.molfile);
+      } else {
+        loadSketchFromSmiles(payload.smiles);
+      }
     }
   };
 
@@ -564,7 +615,7 @@ export const StructureEvidenceEditor = forwardRef<
       setCurrentPayload({ smiles: analyzed.payload.smiles, molfile: '' });
       setSketchDirty(false);
       setSelectedBondId(null);
-      await onSyncStructure?.({ smiles: '', molfile: sketchMolfile });
+      await onSyncStructure?.({ smiles: analyzed.payload.smiles, molfile: sketchMolfile });
       setStatusMessage('Structure editor synced. Atom contribution and fragment analysis now use the drawn structure.');
     } catch (syncError) {
       setError(getApiErrorMessage(syncError, 'The edited structure could not be converted into a molecule.'));

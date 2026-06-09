@@ -38,7 +38,7 @@ export const moleculeService = {
     selected_bond_index?: number;
     smiles?: string;
   }) {
-    const smiles = payload.smiles ? `${payload.smiles}.${payload.fragment_smiles}` : payload.fragment_smiles;
+    const smiles = payload.fragment_smiles.trim() || payload.smiles || 'CCO';
     return {
       fragment_label: payload.fragment_label,
       molfile: '',
