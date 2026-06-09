@@ -14,7 +14,12 @@ const propertyLabels: Record<AtomContributionPropertyName, string> = {
 };
 
 export function App() {
-  const [smiles, setSmiles] = useState('CCO');
+  const [smiles, setSmiles] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 'CCO';
+    }
+    return new URLSearchParams(window.location.search).get('smiles')?.trim() || 'CCO';
+  });
   const [status, setStatus] = useState('Ready');
   const [shapProperty, setShapProperty] = useState<AtomContributionPropertyName>('logp');
 

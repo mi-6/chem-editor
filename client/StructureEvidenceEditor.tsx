@@ -28,6 +28,7 @@ interface StructureEvidenceEditorProps {
 type BondOrder = 1 | 2 | 3;
 
 type SketchAtom = {
+  aromatic?: boolean;
   element: string;
   id: number;
   x: number;
@@ -106,6 +107,7 @@ function formatContributionSummary(
 }
 
 const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
+const smilesAtomPattern = /Br|Cl|[BCNOFPSIbcnops]/g;
 const MIN_CANVAS_SCALE = 0.55;
 const MAX_CANVAS_SCALE = 2.4;
 const CANVAS_SCALE_STEP = 0.16;
@@ -262,17 +264,66 @@ function parseMolfileSketch(molfile: string): { atoms: SketchAtom[]; bonds: Sket
   return { atoms, bonds };
 }
 
+function parseSmilesAtomTokens(smiles: string) {
+  return (normalizeSmiles(smiles).match(smilesAtomPattern) || [])
+    .map((token) => ({
+      aromatic: token === token.toLowerCase(),
+      element: token[0].toUpperCase() + token.slice(1).toLowerCase(),
+    }))
+    .filter((atom) => atomPalette.includes(atom.element) || ['P', 'I'].includes(atom.element));
+}
+
 function sketchFromSmiles(smiles: string): { atoms: SketchAtom[]; bonds: SketchBond[] } | null {
-  const tokens = normalizeSmiles(smiles).match(/Br|Cl|[A-Z][a-z]?/g) || [];
-  const elements = tokens.filter((token) => atomPalette.includes(token) || ['P', 'I'].includes(token));
-  if (!elements.length) {
+  const parsedAtoms = parseSmilesAtomTokens(smiles);
+  if (!parsedAtoms.length) {
     return null;
   }
 
+  const isSixMemberAromaticRing =
+    /[bcnops]1/.test(smiles) &&
+    parsedAtoms.length >= 6 &&
+    parsedAtoms.slice(0, 6).every((atom) => atom.aromatic);
+
+  if (isSixMemberAromaticRing) {
+    const centerX = 420;
+    const centerY = 320;
+    const radius = 98;
+    const ringAtoms = parsedAtoms.slice(0, 6).map((atom, index) => {
+      const angle = -Math.PI / 2 + (index * Math.PI * 2) / 6;
+      return {
+        ...atom,
+        id: index + 1,
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+      };
+    });
+    const substituentAtoms = parsedAtoms.slice(6).map((atom, index) => ({
+      ...atom,
+      id: ringAtoms.length + index + 1,
+      x: centerX + radius + 76 * (index + 1),
+      y: centerY,
+    }));
+    const atoms = [...ringAtoms, ...substituentAtoms];
+    const ringBonds = ringAtoms.map((atom, index) => ({
+      from: atom.id,
+      id: index + 1,
+      order: (index % 2 === 0 ? 2 : 1) as BondOrder,
+      to: ringAtoms[(index + 1) % ringAtoms.length].id,
+    }));
+    const substituentBonds = substituentAtoms.map((atom, index) => ({
+      from: index === 0 ? ringAtoms[2].id : substituentAtoms[index - 1].id,
+      id: ringBonds.length + index + 1,
+      order: 1 as BondOrder,
+      to: atom.id,
+    }));
+
+    return { atoms, bonds: [...ringBonds, ...substituentBonds] };
+  }
+
   const spacing = 70;
-  const startX = 420 - ((elements.length - 1) * spacing) / 2;
-  const atoms = elements.map((element, index) => ({
-    element,
+  const startX = 420 - ((parsedAtoms.length - 1) * spacing) / 2;
+  const atoms = parsedAtoms.map((atom, index) => ({
+    ...atom,
     id: index + 1,
     x: startX + index * spacing,
     y: 320,
