@@ -86,6 +86,10 @@ const shapProperties: Array<{ label: string; value: AtomContributionPropertyName
   { label: 'HBA', value: 'hba' },
 ];
 
+function getShapPropertyLabel(value: AtomContributionPropertyName) {
+  return shapProperties.find((property) => property.value === value)?.label || value;
+}
+
 const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
 const MIN_CANVAS_SCALE = 0.55;
 const MAX_CANVAS_SCALE = 2.4;
@@ -756,12 +760,12 @@ export const StructureEvidenceEditor = forwardRef<
 
       if (result.num_matches > 0) {
         setFragmentStatus(
-          `${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}.`,
+          `${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}.`,
         );
         return;
       }
 
-      setFragmentStatus(`No matches found for ${query} on the current molecule.`);
+      setFragmentStatus(`${getShapPropertyLabel(shapProperty)} view: no matches found for ${query} on the current molecule.`);
     } catch (highlightError) {
       if (requestId !== highlightRequestRef.current) {
         return;
