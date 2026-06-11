@@ -884,6 +884,33 @@ export const StructureEvidenceEditor = forwardRef<
     setFragmentStatus('Fragment removed from your saved library.');
   };
 
+  const loadFragmentInputAsStructure = async () => {
+    const structure = normalizeFragmentInput(fragmentInput);
+    if (!structure) {
+      setFragmentError('Type a SMILES or molfile before loading a structure.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setFragmentError(null);
+    setFragmentStatus(null);
+
+    try {
+      await loadStructure(structure);
+      await onSyncStructure?.(
+        isMolfile(structure)
+          ? { smiles: '', molfile: structure }
+          : { smiles: normalizeSmiles(structure), molfile: '' },
+      );
+      setFragmentStatus(`Loaded ${isMolfile(structure) ? 'molfile' : normalizeSmiles(structure)} as the active structure.`);
+    } catch (loadError) {
+      setFragmentError(getApiErrorMessage(loadError, 'That structure could not be loaded.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const insertFragment = async (fragment: FragmentOption) => {
     const payload = currentWorkingPayload;
     if (!payload.smiles && !payload.molfile) {
@@ -1019,13 +1046,23 @@ export const StructureEvidenceEditor = forwardRef<
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       event.preventDefault();
-                      void runHighlightPreview();
+                      void loadFragmentInputAsStructure();
                     }
                   }}
                   sx={fragmentInputSx}
                 />
               </Stack>
               <Stack direction="row" spacing={0.55} useFlexGap flexWrap="wrap">
+                <Button
+                  variant="contained"
+                  disabled={busy || !normalizeFragmentInput(fragmentInput)}
+                  onClick={() => {
+                    void loadFragmentInputAsStructure();
+                  }}
+                  sx={miniPrimaryButtonSx}
+                >
+                  {busy ? 'Loading' : 'Load'}
+                </Button>
                 <Button
                   variant="outlined"
                   disabled={highlightBusy}
@@ -1037,7 +1074,7 @@ export const StructureEvidenceEditor = forwardRef<
                   {highlightBusy ? 'Highlighting' : 'Highlight'}
                 </Button>
                 <Button
-                  variant="contained"
+                  variant="outlined"
                   disabled={
                     fragmentBusyId !== null ||
                     !isInsertionReadyFragment(fragmentInput) ||
@@ -1052,9 +1089,9 @@ export const StructureEvidenceEditor = forwardRef<
                       smiles: normalizeFragmentInput(fragmentInput),
                     });
                   }}
-                  sx={miniPrimaryButtonSx}
+                  sx={miniButtonSx}
                 >
-                  {fragmentBusyId ? 'Applying edit' : 'Apply edit'}
+                  {fragmentBusyId ? 'Applying edit' : 'Insert fragment'}
                 </Button>
                 <Button
                   variant="text"

@@ -8,7 +8,9 @@ type HighlightOptions = {
   propertyName?: string;
 };
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
+const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+const API_BASE_URL = viteEnv?.VITE_CHEM_API_BASE_URL?.trim().replace(/\/+$/, '') || '';
+const hasChemBackend = Boolean(API_BASE_URL);
 
 type ParsedAtom = {
   aromatic: boolean;
@@ -30,29 +32,6 @@ function sanitizeFragmentSmiles(smiles: string) {
     .replace(/\[\*:1\]/g, '')
     .replace(/\[\*:2\]/g, '')
     .replace(/^\.+|\.+$/g, '');
-}
-
-function buildLocalContributions(smiles: string, propertyName: string) {
-  const atoms = parseSmilesAtoms(smiles);
-  const propertyBias: Record<string, number> = {
-    hba: -0.28,
-    hbd: 0.32,
-    logp: 0.46,
-    molecular_weight: 0.22,
-    tpsa: -0.42,
-  };
-  const base = propertyBias[propertyName] ?? 0.18;
-
-  return atoms.map((atom, atomIndex) => {
-    const heteroShift = atom.element === 'O' || atom.element === 'N' ? -0.3 : 0.12;
-    const aromaticShift = atom.aromatic ? 0.08 : 0;
-    const raw = Number((base + heteroShift + aromaticShift + atomIndex * 0.015).toFixed(3));
-    return {
-      atom_index: atomIndex,
-      normalized: Math.max(-1, Math.min(1, raw)),
-      raw,
-    };
-  });
 }
 
 function findLocalMatches(smiles: string, query: string) {
@@ -86,6 +65,10 @@ function svgFor(label: string) {
 }
 
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
+  if (!hasChemBackend) {
+    throw new Error('Chemistry backend is not configured.');
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     body: JSON.stringify(payload),
     headers: { 'Content-Type': 'application/json' },
@@ -98,6 +81,10 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
 }
 
 async function postForm<T>(path: string, formData: FormData): Promise<T> {
+  if (!hasChemBackend) {
+    throw new Error('Chemistry backend is not configured.');
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     body: formData,
     method: 'POST',
@@ -167,16 +154,12 @@ export const moleculeService = {
     } catch {
       const matches = findLocalMatches(smiles, query);
       const matchedAtoms = Array.from(new Set(matches.flat()));
-      const contributions = buildLocalContributions(smiles, propertyName).filter((item) =>
-        matchedAtoms.includes(item.atom_index),
-      );
-
       return {
-        atom_contribution_svg: svgFor(query),
+        atom_contribution_svg: '',
         error: '',
         highlighted_svg: svgFor(`${query} in ${smiles || 'molfile'}`),
         matched_atoms: matchedAtoms,
-        matched_contributions: contributions,
+        matched_contributions: [],
         matches,
         num_matches: matches.length,
         property_name: propertyName,
