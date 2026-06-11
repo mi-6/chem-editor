@@ -273,69 +273,196 @@ function parseSmilesAtomTokens(smiles: string) {
     .filter((atom) => atomPalette.includes(atom.element) || ['P', 'I'].includes(atom.element));
 }
 
+function findSketchPath(
+  bonds: SketchBond[],
+  start: number,
+  end: number,
+): number[] | null {
+  const queue: number[][] = [[start]];
+  const visited = new Set<number>([start]);
+
+  while (queue.length) {
+    const path = queue.shift() || [];
+    const current = path[path.length - 1];
+    if (current === end) {
+      return path;
+    }
+
+    bonds
+      .filter((bond) => bond.from === current || bond.to === current)
+      .map((bond) => (bond.from === current ? bond.to : bond.from))
+      .forEach((next) => {
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push([...path, next]);
+        }
+      });
+  }
+
+  return null;
+}
+
+function layoutSmilesGraph(
+  atoms: Array<Omit<SketchAtom, 'x' | 'y'>>,
+  bonds: SketchBond[],
+  ringAtomIds: number[],
+): { atoms: SketchAtom[]; bonds: SketchBond[] } {
+  const positions = new Map<number, { x: number; y: number }>();
+  const center = { x: 500, y: 320 };
+  const ringSet = new Set(ringAtomIds);
+
+  if (ringAtomIds.length >= 3) {
+    const radius = Math.max(86, ringAtomIds.length * 15);
+    ringAtomIds.forEach((atomId, index) => {
+      const angle = -Math.PI / 2 + (index * Math.PI * 2) / ringAtomIds.length;
+      positions.set(atomId, {
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius,
+      });
+    });
+  }
+
+  if (!positions.size) {
+    atoms.forEach((atom, index) => {
+      positions.set(atom.id, { x: 260 + index * 70, y: 320 });
+    });
+  }
+
+  const adjacency = new Map<number, number[]>();
+  bonds.forEach((bond) => {
+    adjacency.set(bond.from, [...(adjacency.get(bond.from) || []), bond.to]);
+    adjacency.set(bond.to, [...(adjacency.get(bond.to) || []), bond.from]);
+  });
+
+  const queue = Array.from(positions.keys());
+  const visited = new Set(queue);
+  while (queue.length) {
+    const atomId = queue.shift() || 0;
+    const origin = positions.get(atomId);
+    if (!origin) continue;
+
+    const openNeighbors = (adjacency.get(atomId) || []).filter((neighbor) => !visited.has(neighbor));
+    const baseAngle = ringSet.has(atomId)
+      ? Math.atan2(origin.y - center.y, origin.x - center.x)
+      : Math.PI;
+
+    openNeighbors.forEach((neighbor, index) => {
+      const spread = openNeighbors.length > 1 ? (index - (openNeighbors.length - 1) / 2) * 0.75 : 0;
+      const angle = baseAngle + spread;
+      positions.set(neighbor, {
+        x: origin.x + Math.cos(angle) * 76,
+        y: origin.y + Math.sin(angle) * 76,
+      });
+      visited.add(neighbor);
+      queue.push(neighbor);
+    });
+  }
+
+  return {
+    atoms: atoms.map((atom, index) => ({
+      ...atom,
+      ...(positions.get(atom.id) || { x: 260 + index * 70, y: 320 }),
+    })),
+    bonds,
+  };
+}
+
 function sketchFromSmiles(smiles: string): { atoms: SketchAtom[]; bonds: SketchBond[] } | null {
-  const parsedAtoms = parseSmilesAtomTokens(smiles);
-  if (!parsedAtoms.length) {
+  const source = normalizeSmiles(smiles);
+  if (!source || !looksLikeSmiles(source)) {
     return null;
   }
 
-  const isSixMemberAromaticRing =
-    /[bcnops]1/.test(smiles) &&
-    parsedAtoms.length >= 6 &&
-    parsedAtoms.slice(0, 6).every((atom) => atom.aromatic);
+  const atoms: Array<Omit<SketchAtom, 'x' | 'y'>> = [];
+  const bonds: SketchBond[] = [];
+  const branchStack: number[] = [];
+  const ringOpenings = new Map<string, { atomId: number; order: BondOrder }>();
+  let currentAtomId: number | null = null;
+  let pendingBondOrder: BondOrder = 1;
+  let largestRingPath: number[] = [];
 
-  if (isSixMemberAromaticRing) {
-    const centerX = 420;
-    const centerY = 320;
-    const radius = 98;
-    const ringAtoms = parsedAtoms.slice(0, 6).map((atom, index) => {
-      const angle = -Math.PI / 2 + (index * Math.PI * 2) / 6;
-      return {
-        ...atom,
-        id: index + 1,
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
-      };
-    });
-    const substituentAtoms = parsedAtoms.slice(6).map((atom, index) => ({
-      ...atom,
-      id: ringAtoms.length + index + 1,
-      x: centerX + radius + 76 * (index + 1),
-      y: centerY,
-    }));
-    const atoms = [...ringAtoms, ...substituentAtoms];
-    const ringBonds = ringAtoms.map((atom, index) => ({
-      from: atom.id,
-      id: index + 1,
-      order: (index % 2 === 0 ? 2 : 1) as BondOrder,
-      to: ringAtoms[(index + 1) % ringAtoms.length].id,
-    }));
-    const substituentBonds = substituentAtoms.map((atom, index) => ({
-      from: index === 0 ? ringAtoms[2].id : substituentAtoms[index - 1].id,
-      id: ringBonds.length + index + 1,
-      order: 1 as BondOrder,
-      to: atom.id,
-    }));
+  const addAtom = (token: string) => {
+    const atom = {
+      aromatic: token === token.toLowerCase(),
+      element: token[0].toUpperCase() + token.slice(1).toLowerCase(),
+      id: atoms.length + 1,
+    };
+    if (!atomPalette.includes(atom.element) && !['P', 'I'].includes(atom.element)) {
+      return;
+    }
+    atoms.push(atom);
+    if (currentAtomId) {
+      bonds.push({
+        from: currentAtomId,
+        id: bonds.length + 1,
+        order: pendingBondOrder,
+        to: atom.id,
+      });
+    }
+    currentAtomId = atom.id;
+    pendingBondOrder = 1;
+  };
 
-    return { atoms, bonds: [...ringBonds, ...substituentBonds] };
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const twoChar = source.slice(index, index + 2);
+
+    if (char === '(') {
+      if (currentAtomId) branchStack.push(currentAtomId);
+      continue;
+    }
+    if (char === ')') {
+      currentAtomId = branchStack.pop() ?? currentAtomId;
+      continue;
+    }
+    if (char === '=') {
+      pendingBondOrder = 2;
+      continue;
+    }
+    if (char === '#') {
+      pendingBondOrder = 3;
+      continue;
+    }
+    if (char === '-' || char === '/' || char === '\\') {
+      pendingBondOrder = 1;
+      continue;
+    }
+    if (/\d/.test(char) && currentAtomId) {
+      const opening = ringOpenings.get(char);
+      if (opening) {
+        const path = findSketchPath(bonds, opening.atomId, currentAtomId);
+        bonds.push({
+          from: opening.atomId,
+          id: bonds.length + 1,
+          order: pendingBondOrder || opening.order,
+          to: currentAtomId,
+        });
+        if (path && path.length > largestRingPath.length) {
+          largestRingPath = path;
+        }
+        ringOpenings.delete(char);
+      } else {
+        ringOpenings.set(char, { atomId: currentAtomId, order: pendingBondOrder });
+      }
+      pendingBondOrder = 1;
+      continue;
+    }
+    if (twoChar === 'Cl' || twoChar === 'Br') {
+      addAtom(twoChar);
+      index += 1;
+      continue;
+    }
+    if (smilesAtomPattern.test(char)) {
+      smilesAtomPattern.lastIndex = 0;
+      addAtom(char);
+    }
   }
 
-  const spacing = 70;
-  const startX = 420 - ((parsedAtoms.length - 1) * spacing) / 2;
-  const atoms = parsedAtoms.map((atom, index) => ({
-    ...atom,
-    id: index + 1,
-    x: startX + index * spacing,
-    y: 320,
-  }));
-  const bonds = atoms.slice(1).map((atom, index) => ({
-    from: atoms[index].id,
-    id: index + 1,
-    order: smiles.includes('=') && index === 0 ? 2 as BondOrder : 1 as BondOrder,
-    to: atom.id,
-  }));
+  if (!atoms.length) {
+    return null;
+  }
 
-  return { atoms, bonds };
+  return layoutSmilesGraph(atoms, bonds, largestRingPath);
 }
 
 function getSvgPoint(event: React.MouseEvent<SVGSVGElement> | React.WheelEvent<SVGSVGElement>) {
