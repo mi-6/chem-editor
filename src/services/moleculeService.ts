@@ -1,3 +1,5 @@
+import { sketchFromSmiles } from './smilesSketch';
+
 type StructurePayload = {
   molfile?: string;
   smiles?: string;
@@ -12,20 +14,6 @@ const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | und
 const API_BASE_URL = viteEnv?.VITE_CHEM_API_BASE_URL?.trim().replace(/\/+$/, '') || '';
 const hasChemBackend = Boolean(API_BASE_URL);
 
-type ParsedAtom = {
-  aromatic: boolean;
-  element: string;
-};
-
-const elementPattern = /Br|Cl|[BCNOFPSIbcnops]/g;
-
-function parseSmilesAtoms(smiles: string): ParsedAtom[] {
-  return (smiles.match(elementPattern) || []).map((token) => ({
-    aromatic: token === token.toLowerCase(),
-    element: token[0].toUpperCase() + token.slice(1).toLowerCase(),
-  }));
-}
-
 function sanitizeFragmentSmiles(smiles: string) {
   return smiles
     .trim()
@@ -35,8 +23,8 @@ function sanitizeFragmentSmiles(smiles: string) {
 }
 
 function findLocalMatches(smiles: string, query: string) {
-  const atoms = parseSmilesAtoms(smiles);
-  const queryAtoms = parseSmilesAtoms(query);
+  const atoms = sketchFromSmiles(smiles)?.atoms || [];
+  const queryAtoms = sketchFromSmiles(query)?.atoms || [];
   if (!atoms.length || !queryAtoms.length) {
     return [];
   }

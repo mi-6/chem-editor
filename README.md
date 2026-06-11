@@ -21,9 +21,9 @@ The module is designed around this workflow:
 | SDF input | Partial | Single mol blocks can work; multi-record SDF import is not implemented. |
 | Rich sketch surface | Supported | Atoms, bonds, delete, clear, zoom, and fragment workflows. |
 | Text-first editor | Supported | `StructureEditorPanel` exposes a textarea and imperative ref API. |
-| Local 2D preview | Supported | Standalone service returns local SVG fallback previews. |
-| Backend 2D preview | Supported when host exists | Service shim tries backend endpoints before falling back locally. |
-| Substructure highlight | Supported | Uses backend when available and local fallback otherwise. |
+| Local 2D preview | Supported | Standalone service renders local OpenSMILES sketches without a backend. |
+| Backend 2D preview | Supported when configured | Set `VITE_CHEM_API_BASE_URL` to use backend/RDKit endpoints. |
+| Substructure highlight | Supported | Uses backend when configured and local OpenSMILES atom matching otherwise. |
 | Fragment insertion | Supported as prototype | Local fallback concatenates simple fragment SMILES. |
 | Ketcher panel | Host-oriented | `KetcherEditorPanel` supports conversion and preview flows with host dependencies. |
 | 3D navigation | Host-dependent | This module emits structure data; it does not include a 3D viewer. |
@@ -69,7 +69,7 @@ For host/backend integration:
 - Optional chemistry backend exposing analyze and substructure-highlight endpoints.
 - Optional Ketcher/Indigo tooling if using the host Ketcher panel at full fidelity.
 
-The standalone app works without a backend. The local service shim attempts backend calls first and falls back to lightweight local behavior when the backend is unavailable.
+The standalone app works without a backend and does not call a default localhost API. Set `VITE_CHEM_API_BASE_URL` only when you want to connect a chemistry backend for RDKit-grade validation, canonicalization, and depiction.
 
 ## Quick Start: Standalone UI
 
@@ -121,6 +121,16 @@ The standalone app starts at `src/App.tsx`. It renders `StructureEvidenceEditor`
 On sync, the app stores the latest SMILES from the emitted `StructurePayload`. If no SMILES is available, it displays a generic molfile status.
 
 The standalone app is intentionally focused on structure entry and editing. It does not include account flows, workspace persistence, 3D visualization, prediction, generation, or retrosynthesis.
+
+## Backend Mode
+
+Backend mode is opt-in:
+
+```bash
+VITE_CHEM_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+```
+
+When `VITE_CHEM_API_BASE_URL` is not set, the editor stays fully local and labels results as coming from the local OpenSMILES parser. Use backend/RDKit mode for canonical SMILES, chemically precise 2D coordinates, valence validation, and model-derived atom contributions.
 
 ## Core Data Contract
 
@@ -305,7 +315,7 @@ Purpose:
 
 | Format | Supported | Notes |
 | --- | --- | --- |
-| SMILES | Yes | Example: `CCO`. Whitespace is trimmed and the first token is used. |
+| SMILES | Yes | Parsed locally with OpenSMILES-oriented support for organic subset atoms, bracket atoms, rings, branches, components, and common bond syntax. |
 | MDL MOL V2000 | Yes | Detected by `V2000` or `M  END`. |
 | MDL MOL V3000 | Yes | Detected by `V3000` or `M  END`. |
 | SDF | Partial | Single mol block can work; multi-record parsing is not implemented. |
@@ -320,7 +330,7 @@ File:
 src/services/moleculeService.ts
 ```
 
-The standalone service exposes three functions:
+The standalone service exposes three functions and only calls a backend when `VITE_CHEM_API_BASE_URL` is configured:
 
 ```ts
 moleculeService.analyzeWorkspace(payload)
@@ -341,17 +351,17 @@ Accepts:
 
 Behavior:
 
-1. Sends a `FormData` request to `http://127.0.0.1:8000/api/v1/analyze` when available.
+1. In backend mode, sends a `FormData` request to `${VITE_CHEM_API_BASE_URL}/api/v1/analyze`.
 2. Expects `smiles`, `molfile`, and `structure_2d` fields.
-3. Falls back to a simple local SVG preview if the backend is unavailable.
+3. In standalone mode, returns a local OpenSMILES sketch preview.
 
 ### `highlightSubstructure(smiles, query, options?)`
 
 Behavior:
 
-1. Sends JSON to `http://127.0.0.1:8000/api/v1/substructure-highlight`.
+1. In backend mode, sends JSON to `${VITE_CHEM_API_BASE_URL}/api/v1/substructure-highlight`.
 2. Expects match counts, matched atoms, contribution values, and SVGs.
-3. Falls back to a lightweight local atom matching heuristic.
+3. In standalone mode, uses lightweight local OpenSMILES atom matching and does not fabricate atom-contribution values.
 
 ### `insertFragment(payload)`
 
@@ -362,6 +372,10 @@ Current standalone behavior:
 - Returns the new SMILES and fragment label.
 
 Production recommendation: implement fragment insertion through RDKit or the host chemistry backend so attachment points and selected bonds are handled chemically.
+
+## Standalone Limitations
+
+The local OpenSMILES parser is intended for resilient loading and sketching, not authoritative chemistry. It preserves common syntax such as bracket metadata, charges, chirality markers, disconnected salts, ring closures, and slash/backslash bond markers, but it does not perform RDKit-grade canonicalization, valence validation, aromaticity perception, stereochemical validation, or publication-quality coordinate generation.
 
 ## Backend Endpoint Expectations
 
@@ -574,13 +588,13 @@ Do not embed a 3D viewer directly in this module. Instead:
 
 Use the URL printed by Vite. Another feature app may already be using the default port.
 
-### Backend requests fail in standalone mode
+### Unexpected backend requests appear in standalone mode
 
-This is expected if the MolVis backend is not running at `http://127.0.0.1:8000`. The service falls back to local SVG and matching behavior.
+Unset `VITE_CHEM_API_BASE_URL` and restart Vite. Standalone mode should use local OpenSMILES parsing without calling a backend.
 
 ### SMILES preview looks generic
 
-The local fallback SVG is intentionally simple. Run the chemistry backend to get higher-quality structure diagrams.
+The local OpenSMILES sketcher prioritizes resilient graph loading over publication-quality coordinates. Run a chemistry backend to get higher-quality structure diagrams.
 
 ### Molfile input is treated as SMILES
 

@@ -83,3 +83,49 @@ describe('sketchFromSmiles fixture coverage', () => {
     }
   });
 });
+
+describe('OpenSMILES details', () => {
+  it('preserves bracket atom metadata', () => {
+    const sketch = sketchFromSmiles('[13C@@H+:7]([O-])N');
+    const atom = sketch?.atoms[0];
+
+    expect(atom).toMatchObject({
+      atomClass: 7,
+      charge: 1,
+      chirality: '@@',
+      element: 'C',
+      hydrogens: 1,
+      isotope: 13,
+    });
+    expect(sketch?.atoms.some((candidate) => candidate.element === 'O' && candidate.charge === -1)).toBe(true);
+  });
+
+  it('supports repeated charge shorthand in bracket atoms', () => {
+    const sketch = sketchFromSmiles('[N++]([O--])C');
+
+    expect(sketch?.atoms[0]).toMatchObject({ charge: 2, element: 'N' });
+    expect(sketch?.atoms.some((candidate) => candidate.element === 'O' && candidate.charge === -2)).toBe(true);
+  });
+
+  it('marks aromatic bonds on aromatic ring closures', () => {
+    const sketch = sketchFromSmiles('c1ccccc1');
+
+    expect(sketch?.atoms.every((atom) => atom.aromatic)).toBe(true);
+    expect(sketch?.bonds.some((bond) => bond.aromatic)).toBe(true);
+    expect(sketch?.bonds.length).toBe(6);
+  });
+
+  it('preserves directional slash bond markers', () => {
+    const sketch = sketchFromSmiles('C/C=C\\C');
+
+    expect(sketch?.bonds.some((bond) => bond.stereo === '/')).toBe(true);
+    expect(sketch?.bonds.some((bond) => bond.stereo === '\\')).toBe(true);
+  });
+
+  it('supports two-digit ring closures', () => {
+    const sketch = sketchFromSmiles('C%12CCCCC%12');
+
+    expect(sketch?.atoms.length).toBe(6);
+    expect(sketch?.bonds.length).toBe(6);
+  });
+});

@@ -107,6 +107,10 @@ function formatContributionSummary(
     .join(', ');
 }
 
+function formatSourceLabel(source: unknown) {
+  return source === 'local fallback' ? 'local OpenSMILES parser' : String(source || '');
+}
+
 const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
 const MIN_CANVAS_SCALE = 0.55;
 const MAX_CANVAS_SCALE = 2.4;
@@ -751,14 +755,14 @@ export const StructureEvidenceEditor = forwardRef<
       });
 
       if (result.num_matches > 0) {
-        const source = 'source' in result ? `${result.source}: ` : '';
+        const source = 'source' in result ? `${formatSourceLabel(result.source)}: ` : '';
         setFragmentStatus(
           `${source}${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}. Top values: ${formatContributionSummary(result.matched_contributions)}.`,
         );
         return;
       }
 
-      const source = 'source' in result ? `${result.source}: ` : '';
+      const source = 'source' in result ? `${formatSourceLabel(result.source)}: ` : '';
       setFragmentStatus(`${source}${getShapPropertyLabel(shapProperty)} view: no matches found for ${query} on the current molecule.`);
     } catch (highlightError) {
       if (requestId !== highlightRequestRef.current) {
@@ -829,7 +833,7 @@ export const StructureEvidenceEditor = forwardRef<
           ? { smiles: '', molfile: structure }
           : { smiles: normalizeSmiles(structure), molfile: '' },
       );
-      setFragmentStatus(`Loaded ${isMolfile(structure) ? 'molfile' : normalizeSmiles(structure)} as the active structure.`);
+      setFragmentStatus(`Loaded ${isMolfile(structure) ? 'molfile' : normalizeSmiles(structure)} as the active structure with the local OpenSMILES parser.`);
     } catch (loadError) {
       setFragmentError(getApiErrorMessage(loadError, 'That structure could not be loaded.'));
     } finally {
@@ -947,6 +951,9 @@ export const StructureEvidenceEditor = forwardRef<
       ) : null}
 
       {statusMessage ? <Typography sx={statusLineSx}>{statusMessage}</Typography> : null}
+      <Alert severity="info" sx={alertSx}>
+        Standalone mode uses a local OpenSMILES parser for sketching. Backend/RDKit is required for canonicalization, valence validation, and chemically precise 2D depiction.
+      </Alert>
 
       <Box sx={workspaceGridSx}>
         <Box sx={viewerPanelSx}>
