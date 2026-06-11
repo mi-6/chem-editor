@@ -11,7 +11,11 @@ type HighlightOptions = {
 };
 
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-const API_BASE_URL = viteEnv?.VITE_CHEM_API_BASE_URL?.trim().replace(/\/+$/, '') || '';
+const configuredApiBaseUrl = viteEnv?.VITE_CHEM_API_BASE_URL?.trim();
+const standaloneBackendValues = new Set(['', '0', 'false', 'none', 'off', 'standalone']);
+const API_BASE_URL = configuredApiBaseUrl !== undefined && standaloneBackendValues.has(configuredApiBaseUrl.toLowerCase())
+  ? ''
+  : (configuredApiBaseUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const hasChemBackend = Boolean(API_BASE_URL);
 
 function sanitizeFragmentSmiles(smiles: string) {
@@ -102,13 +106,16 @@ export const moleculeService = {
       return {
         molfile: result.molfile || payload.molfile || '',
         smiles: result.smiles || payload.smiles || 'CCO',
+        source: 'RDKit backend',
         structure_2d: result.structure_2d || svgFor(result.smiles || payload.smiles || 'CCO'),
       };
-    } catch {
+    } catch (backendError) {
       const smiles = payload.smiles || '';
       return {
         smiles,
         molfile: payload.molfile || '',
+        source: 'local fallback',
+        source_error: backendError instanceof Error ? backendError.message : 'Backend request failed',
         structure_2d: svgFor(smiles || 'molfile structure'),
       };
     }
@@ -139,7 +146,7 @@ export const moleculeService = {
         ...result,
         source: 'RDKit backend',
       };
-    } catch {
+    } catch (backendError) {
       const matches = findLocalMatches(smiles, query);
       const matchedAtoms = Array.from(new Set(matches.flat()));
       return {
@@ -152,6 +159,7 @@ export const moleculeService = {
         num_matches: matches.length,
         property_name: propertyName,
         source: 'local fallback',
+        source_error: backendError instanceof Error ? backendError.message : 'Backend request failed',
       };
     }
   },

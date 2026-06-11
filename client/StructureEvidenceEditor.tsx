@@ -94,8 +94,16 @@ function getShapPropertyLabel(value: AtomContributionPropertyName) {
 
 function formatContributionSummary(
   contributions: Array<{ atom_index: number; normalized: number; raw: number }> | undefined,
+  source?: unknown,
+  sourceError?: unknown,
 ) {
   if (!contributions?.length) {
+    if (source === 'local fallback') {
+      const reason = typeof sourceError === 'string' && sourceError
+        ? ` Backend response: ${sourceError}.`
+        : '';
+      return `backend SHAP values unavailable; showing structural matches only.${reason}`;
+    }
     return 'no atom contribution values returned';
   }
 
@@ -109,6 +117,16 @@ function formatContributionSummary(
 
 function formatSourceLabel(source: unknown) {
   return source === 'local fallback' ? 'local OpenSMILES parser' : String(source || '');
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
@@ -356,6 +374,8 @@ export const StructureEvidenceEditor = forwardRef<
     propertyName?: string;
     query: string;
     atomContributionSvg?: string;
+    source?: string;
+    sourceError?: string;
     svg: string;
   } | null>(null);
   const [sketchAtoms, setSketchAtoms] = useState<SketchAtom[]>([
@@ -467,6 +487,22 @@ export const StructureEvidenceEditor = forwardRef<
     setCanvasScale(0.86);
     setCanvasOffset({ x: 0, y: 0 });
   }, []);
+
+  const exportCanvasSvg = useCallback(() => {
+    if (!svgRef.current) {
+      setStatusMessage('There is no 2D structure to export yet.');
+      return;
+    }
+
+    const serializer = new XMLSerializer();
+    const svg = serializer.serializeToString(svgRef.current);
+    const label = (currentWorkingPayload.smiles || 'molvis-structure')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'molvis-structure';
+    downloadTextFile(`${label}.svg`, svg, 'image/svg+xml;charset=utf-8');
+    setStatusMessage('2D structure exported as SVG.');
+  }, [currentWorkingPayload.smiles]);
 
   const matchedSketchAtoms = useMemo(
     () => new Set(displayHighlightPreview?.matchedAtoms.map((atomIndex) => sketchAtoms[atomIndex]?.id).filter(Boolean)),
@@ -751,13 +787,15 @@ export const StructureEvidenceEditor = forwardRef<
         propertyName: result.property_name,
         query,
         atomContributionSvg: result.atom_contribution_svg,
+        source: 'source' in result ? String(result.source) : undefined,
+        sourceError: 'source_error' in result ? String(result.source_error) : undefined,
         svg: result.highlighted_svg,
       });
 
       if (result.num_matches > 0) {
         const source = 'source' in result ? `${formatSourceLabel(result.source)}: ` : '';
         setFragmentStatus(
-          `${source}${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}. Top values: ${formatContributionSummary(result.matched_contributions)}.`,
+          `${source}${getShapPropertyLabel(shapProperty)} view: ${query} matches ${result.matched_atoms.length} atom${result.matched_atoms.length === 1 ? '' : 's'} across ${result.num_matches} hit${result.num_matches === 1 ? '' : 's'}. Top values: ${formatContributionSummary(result.matched_contributions, result.source, result.source_error)}.`,
         );
         return;
       }
@@ -925,10 +963,12 @@ export const StructureEvidenceEditor = forwardRef<
           {shapProperties.map((property) => (
             <Chip
               key={property.value}
+              clickable
               label={property.label}
               color={shapProperty === property.value ? 'primary' : 'default'}
+              variant={shapProperty === property.value ? 'filled' : 'outlined'}
               onClick={() => onChangeShapProperty?.(property.value)}
-              sx={chipSx}
+              sx={shapProperty === property.value ? selectedChipSx : chipSx}
             />
           ))}
         </Stack>
@@ -941,6 +981,15 @@ export const StructureEvidenceEditor = forwardRef<
           >
             Upload
           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<UploadFileRoundedIcon />}
+            disabled={!sketchAtoms.length}
+            onClick={exportCanvasSvg}
+            sx={secondaryButtonSx}
+          >
+            Export SVG
+          </Button>
         </Stack>
       </Stack>
 
@@ -952,7 +1001,7 @@ export const StructureEvidenceEditor = forwardRef<
 
       {statusMessage ? <Typography sx={statusLineSx}>{statusMessage}</Typography> : null}
       <Alert severity="info" sx={alertSx}>
-        Standalone mode uses a local OpenSMILES parser for sketching. Backend/RDKit is required for canonicalization, valence validation, and chemically precise 2D depiction.
+        The editor tries the chemistry backend at 127.0.0.1:8000 by default. If it is unavailable, local OpenSMILES matching is used for structure sketching only; RDKit/SHAP values require the backend.
       </Alert>
 
       <Box sx={workspaceGridSx}>
@@ -1632,8 +1681,20 @@ const chipSx = {
   height: 28,
   borderRadius: '4px',
   border: '1.5px solid rgba(226, 232, 240, 0.7)',
+  backgroundColor: '#ffffff',
+  color: '#475569',
   '& .MuiChip-label': {
     px: 1,
+  },
+} as const;
+
+const selectedChipSx = {
+  ...chipSx,
+  border: '1.5px solid var(--molvis-accent)',
+  backgroundColor: 'var(--molvis-accent)',
+  color: '#ffffff',
+  '&:hover': {
+    backgroundColor: 'var(--molvis-accent-strong)',
   },
 } as const;
 

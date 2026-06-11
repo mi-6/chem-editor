@@ -69,7 +69,7 @@ For host/backend integration:
 - Optional chemistry backend exposing analyze and substructure-highlight endpoints.
 - Optional Ketcher/Indigo tooling if using the host Ketcher panel at full fidelity.
 
-The standalone app works without a backend and does not call a default localhost API. Set `VITE_CHEM_API_BASE_URL` only when you want to connect a chemistry backend for RDKit-grade validation, canonicalization, and depiction.
+The standalone app tries `http://127.0.0.1:8000` by default and falls back to the local OpenSMILES sketcher when the backend is unavailable. Set `VITE_CHEM_API_BASE_URL` to point at a different chemistry backend, or set it to `standalone` when you intentionally want frontend-only local parsing.
 
 ## Quick Start: Standalone UI
 
@@ -124,13 +124,19 @@ The standalone app is intentionally focused on structure entry and editing. It d
 
 ## Backend Mode
 
-Backend mode is opt-in:
+Backend mode is enabled by default against `http://127.0.0.1:8000`. To use a different backend:
 
 ```bash
 VITE_CHEM_API_BASE_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-When `VITE_CHEM_API_BASE_URL` is not set, the editor stays fully local and labels results as coming from the local OpenSMILES parser. Use backend/RDKit mode for canonical SMILES, chemically precise 2D coordinates, valence validation, and model-derived atom contributions.
+When the backend cannot be reached, the editor labels results as coming from the local OpenSMILES parser and does not pretend SHAP values are available. Use backend/RDKit mode for canonical SMILES, chemically precise 2D coordinates, valence validation, and model-derived atom contributions.
+
+To force local-only development:
+
+```bash
+VITE_CHEM_API_BASE_URL=standalone npm run dev
+```
 
 ## Core Data Contract
 
