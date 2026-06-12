@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:standalone": "VITE_CHEM_API_BASE_URL=standalone vite --host 127.0.0.1",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "test": "vitest run",

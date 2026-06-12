@@ -34,6 +34,7 @@ const organicSubset = new Set([
   'H',
   'I',
   'N',
+  'Na',
   'O',
   'P',
   'S',

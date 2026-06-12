@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { moleculeService } from './moleculeService';
 
 describe('moleculeService backend fallback mode', () => {
-  it('tries the localhost backend by default and falls back to local analysis when unavailable', async () => {
+  it('tries the MolVis API backend by default and falls back to local analysis when unavailable', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockRejectedValueOnce(new Error('backend offline'));
@@ -11,7 +11,7 @@ describe('moleculeService backend fallback mode', () => {
     const result = await moleculeService.analyzeWorkspace({ smiles: 'COc1cc(C=O)ccc1O' });
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/analyze',
+      'http://127.0.0.1:8000/api/v1/analyze',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(result.smiles).toBe('COc1cc(C=O)ccc1O');

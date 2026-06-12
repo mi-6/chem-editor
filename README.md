@@ -69,7 +69,7 @@ For host/backend integration:
 - Optional chemistry backend exposing analyze and substructure-highlight endpoints.
 - Optional Ketcher/Indigo tooling if using the host Ketcher panel at full fidelity.
 
-The standalone app tries `http://127.0.0.1:8000` by default and falls back to the local OpenSMILES sketcher when the backend is unavailable. Set `VITE_CHEM_API_BASE_URL` to point at a different chemistry backend, or set it to `standalone` when you intentionally want frontend-only local parsing.
+The standalone app uses the local MolVis backend at `http://127.0.0.1:8000/api/v1` by default for RDKit-backed analysis and highlighting. Set `VITE_CHEM_API_BASE_URL=standalone` when you intentionally want frontend-only local parsing.
 
 ## Quick Start: Standalone UI
 
@@ -124,10 +124,17 @@ The standalone app is intentionally focused on structure entry and editing. It d
 
 ## Backend Mode
 
-Backend mode is enabled by default against `http://127.0.0.1:8000`. To use a different backend:
+The default `npm run dev` command calls the local MolVis backend at `http://127.0.0.1:8000/api/v1`. Start the MolVis server first:
 
 ```bash
-VITE_CHEM_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+cd /Users/skb/Documents/molvis/server
+.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+To use a different backend:
+
+```bash
+VITE_CHEM_API_BASE_URL=http://127.0.0.1:8000/api/v1 npm run dev
 ```
 
 When the backend cannot be reached, the editor labels results as coming from the local OpenSMILES parser and does not pretend SHAP values are available. Use backend/RDKit mode for canonical SMILES, chemically precise 2D coordinates, valence validation, and model-derived atom contributions.
@@ -135,7 +142,7 @@ When the backend cannot be reached, the editor labels results as coming from the
 To force local-only development:
 
 ```bash
-VITE_CHEM_API_BASE_URL=standalone npm run dev
+npm run dev:standalone
 ```
 
 ## Core Data Contract

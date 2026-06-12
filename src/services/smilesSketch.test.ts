@@ -107,6 +107,15 @@ describe('OpenSMILES details', () => {
     expect(sketch?.atoms.some((candidate) => candidate.element === 'O' && candidate.charge === -2)).toBe(true);
   });
 
+  it('preserves disconnected ionic salt atoms and charges', () => {
+    const sketch = sketchFromSmiles('CC(=O)[O-].[Na+]');
+
+    expect(sketch?.atoms).toHaveLength(5);
+    expect(sketch?.bonds).toHaveLength(3);
+    expect(sketch?.atoms.some((candidate) => candidate.element === 'O' && candidate.charge === -1)).toBe(true);
+    expect(sketch?.atoms.some((candidate) => candidate.element === 'Na' && candidate.charge === 1)).toBe(true);
+  });
+
   it('marks aromatic bonds on aromatic ring closures', () => {
     const sketch = sketchFromSmiles('c1ccccc1');
 

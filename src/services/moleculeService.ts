@@ -13,9 +13,25 @@ type HighlightOptions = {
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
 const configuredApiBaseUrl = viteEnv?.VITE_CHEM_API_BASE_URL?.trim();
 const standaloneBackendValues = new Set(['', '0', 'false', 'none', 'off', 'standalone']);
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
+
+function normalizeApiBaseUrl(value: string) {
+  const trimmed = value.replace(/\/+$/, '');
+  try {
+    const url = new URL(trimmed);
+    if (!url.pathname || url.pathname === '/') {
+      url.pathname = '/api/v1';
+      return url.toString().replace(/\/+$/, '');
+    }
+  } catch {
+    return trimmed;
+  }
+  return trimmed;
+}
+
 const API_BASE_URL = configuredApiBaseUrl !== undefined && standaloneBackendValues.has(configuredApiBaseUrl.toLowerCase())
   ? ''
-  : (configuredApiBaseUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+  : normalizeApiBaseUrl(configuredApiBaseUrl || DEFAULT_API_BASE_URL);
 const hasChemBackend = Boolean(API_BASE_URL);
 
 function sanitizeFragmentSmiles(smiles: string) {

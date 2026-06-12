@@ -30,6 +30,7 @@ type BondOrder = 1 | 2 | 3;
 
 type SketchAtom = {
   aromatic?: boolean;
+  charge?: number;
   element: string;
   id: number;
   x: number;
@@ -40,6 +41,7 @@ type SketchBond = {
   from: number;
   id: number;
   order: BondOrder;
+  stereo?: 'up' | 'down';
   to: number;
 };
 
@@ -129,7 +131,7 @@ function downloadTextFile(filename: string, content: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
-const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br'];
+const atomPalette = ['C', 'N', 'O', 'S', 'F', 'Cl', 'Br', 'Na'];
 const MIN_CANVAS_SCALE = 0.55;
 const MAX_CANVAS_SCALE = 2.4;
 const CANVAS_SCALE_STEP = 0.16;
@@ -233,7 +235,20 @@ function buildSketchMolfile(atoms: SketchAtom[], bonds: SketchBond[]) {
   });
   const bondLines = bonds
     .filter((bond) => atomIndex.has(bond.from) && atomIndex.has(bond.to))
-    .map((bond) => `${String(atomIndex.get(bond.from)).padStart(3, ' ')}${String(atomIndex.get(bond.to)).padStart(3, ' ')}${String(bond.order).padStart(3, ' ')}  0  0  0  0`);
+    .map((bond) => {
+      const stereo = bond.order === 1 ? bond.stereo === 'up' ? 1 : bond.stereo === 'down' ? 6 : 0 : 0;
+      return `${String(atomIndex.get(bond.from)).padStart(3, ' ')}${String(atomIndex.get(bond.to)).padStart(3, ' ')}${String(bond.order).padStart(3, ' ')}${String(stereo).padStart(3, ' ')}  0  0  0`;
+    });
+  const chargeEntries = atoms
+    .map((atom, index) => ({ atomIndex: index + 1, charge: atom.charge || 0 }))
+    .filter((entry) => entry.charge !== 0);
+  const chargeLines: string[] = [];
+  for (let index = 0; index < chargeEntries.length; index += 8) {
+    const chunk = chargeEntries.slice(index, index + 8);
+    chargeLines.push(`M  CHG${String(chunk.length).padStart(3, ' ')}${chunk
+      .map((entry) => `${String(entry.atomIndex).padStart(4, ' ')}${String(entry.charge).padStart(4, ' ')}`)
+      .join('')}`);
+  }
 
   return [
     'MolVis live sketch',
@@ -242,6 +257,7 @@ function buildSketchMolfile(atoms: SketchAtom[], bonds: SketchBond[]) {
     `${String(atoms.length).padStart(3, ' ')}${String(bondLines.length).padStart(3, ' ')}  0  0  0  0            999 V2000`,
     ...atomLines,
     ...bondLines,
+    ...chargeLines,
     'M  END',
   ].join('\n');
 }
@@ -259,11 +275,28 @@ function parseMolfileSketch(molfile: string): { atoms: SketchAtom[]; bonds: Sket
     return null;
   }
 
+  const chargeByAtomIndex = new Map<number, number>();
+  lines.slice(4 + atomCount + bondCount).forEach((line) => {
+    if (!line.startsWith('M  CHG')) {
+      return;
+    }
+    const parts = line.trim().split(/\s+/);
+    const entryCount = Number.parseInt(parts[2] || '0', 10);
+    for (let entryIndex = 0; entryIndex < entryCount; entryIndex += 1) {
+      const atomIndex = Number.parseInt(parts[3 + entryIndex * 2] || '0', 10);
+      const charge = Number.parseInt(parts[4 + entryIndex * 2] || '0', 10);
+      if (atomIndex && charge) {
+        chargeByAtomIndex.set(atomIndex, charge);
+      }
+    }
+  });
+
   const atoms = lines.slice(4, 4 + atomCount).map((line, index) => {
     const parts = line.trim().split(/\s+/);
     const x = Number.parseFloat(parts[0] || '0');
     const y = Number.parseFloat(parts[1] || '0');
     return {
+      charge: chargeByAtomIndex.get(index + 1),
       element: parts[3] || 'C',
       id: index + 1,
       x: x * 44 + 420,
@@ -274,11 +307,13 @@ function parseMolfileSketch(molfile: string): { atoms: SketchAtom[]; bonds: Sket
     const from = Number.parseInt(line.slice(0, 3).trim(), 10);
     const to = Number.parseInt(line.slice(3, 6).trim(), 10);
     const order = Number.parseInt(line.slice(6, 9).trim(), 10);
+    const stereo = Number.parseInt(line.slice(9, 12).trim(), 10);
     const parsedOrder: BondOrder = order === 2 || order === 3 ? order : 1;
     return {
       from,
       id: index + 1,
       order: parsedOrder,
+      stereo: parsedOrder === 1 && stereo === 1 ? 'up' : parsedOrder === 1 && stereo === 6 ? 'down' : undefined,
       to,
     };
   });
@@ -324,6 +359,15 @@ function getAtomGradId(element: string) {
 
 function getAtomTextColor(element: string) {
   return element === 'H' ? '#0f172a' : '#ffffff';
+}
+
+function formatAtomCharge(charge?: number) {
+  if (!charge) {
+    return '';
+  }
+  const sign = charge > 0 ? '+' : '-';
+  const magnitude = Math.abs(charge);
+  return magnitude === 1 ? sign : `${magnitude}${sign}`;
 }
 
 function contributionColor(value: number | undefined, fallback: string) {
@@ -390,6 +434,7 @@ export const StructureEvidenceEditor = forwardRef<
   const [selectedAtomId, setSelectedAtomId] = useState<number | null>(2);
   const [selectedElement, setSelectedElement] = useState('C');
   const [selectedBondOrder, setSelectedBondOrder] = useState<BondOrder>(1);
+  const [selectedBondStereo, setSelectedBondStereo] = useState<SketchBond['stereo']>(undefined);
   const [dragAtomId, setDragAtomId] = useState<number | null>(null);
   const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
   const [canvasScale, setCanvasScale] = useState(0.86);
@@ -570,7 +615,10 @@ export const StructureEvidenceEditor = forwardRef<
     }
 
     setSketchAtoms(parsed.atoms);
-    setSketchBonds(parsed.bonds);
+    setSketchBonds(parsed.bonds.map((bond) => ({
+      ...bond,
+      stereo: bond.stereo === '/' ? 'up' : bond.stereo === '\\' ? 'down' : undefined,
+    })));
     setSelectedAtomId(parsed.atoms[0]?.id || null);
     setSelectedBondId(null);
     setSketchDirty(false);
@@ -689,6 +737,7 @@ export const StructureEvidenceEditor = forwardRef<
               from: selectedAtomId,
               id: Math.max(0, ...current.map((bond) => bond.id)) + 1,
               order: selectedBondOrder,
+              stereo: selectedBondOrder === 1 ? selectedBondStereo : undefined,
               to: hitAtom.id,
             },
           ]);
@@ -719,6 +768,7 @@ export const StructureEvidenceEditor = forwardRef<
           from: selectedAtomId,
           id: Math.max(0, ...current.map((bond) => bond.id)) + 1,
           order: selectedBondOrder,
+          stereo: selectedBondOrder === 1 ? selectedBondStereo : undefined,
           to: nextAtomId,
         },
       ]);
@@ -866,12 +916,15 @@ export const StructureEvidenceEditor = forwardRef<
 
     try {
       await loadStructure(structure);
+      const loadedPayload = isMolfile(structure)
+        ? { smiles: '', molfile: structure }
+        : { smiles: normalizeSmiles(structure), molfile: '' };
       await onSyncStructure?.(
         isMolfile(structure)
           ? { smiles: '', molfile: structure }
           : { smiles: normalizeSmiles(structure), molfile: '' },
       );
-      setFragmentStatus(`Loaded ${isMolfile(structure) ? 'molfile' : normalizeSmiles(structure)} as the active structure with the local OpenSMILES parser.`);
+      setFragmentStatus(`Loaded ${loadedPayload.smiles || 'molfile'} as the active structure with the RDKit backend.`);
     } catch (loadError) {
       setFragmentError(getApiErrorMessage(loadError, 'That structure could not be loaded.'));
     } finally {
@@ -1170,7 +1223,12 @@ export const StructureEvidenceEditor = forwardRef<
                       key={order}
                       label={order === 1 ? '1x' : order === 2 ? '2x' : '3x'}
                       color={selectedBondOrder === order ? 'primary' : 'default'}
-                      onClick={() => setSelectedBondOrder(order as BondOrder)}
+                      onClick={() => {
+                        setSelectedBondOrder(order as BondOrder);
+                        if (order !== 1) {
+                          setSelectedBondStereo(undefined);
+                        }
+                      }}
                       sx={{
                         ...chipSx,
                         width: 28,
@@ -1184,6 +1242,32 @@ export const StructureEvidenceEditor = forwardRef<
                     />
                   ))}
                 </Stack>
+                {selectedBondOrder === 1 ? (
+                  <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" sx={{ width: '100%', justifyContent: 'center', p: 0.2 }}>
+                    {[
+                      { label: 'Flat', value: undefined },
+                      { label: 'Wedge', value: 'up' },
+                      { label: 'Dash', value: 'down' },
+                    ].map((option) => (
+                      <Chip
+                        key={option.label}
+                        label={option.label}
+                        color={selectedBondStereo === option.value ? 'primary' : 'default'}
+                        onClick={() => setSelectedBondStereo(option.value as SketchBond['stereo'])}
+                        sx={{
+                          ...chipSx,
+                          width: 48,
+                          height: 24,
+                          borderRadius: 0.5,
+                          fontSize: '0.62rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          '& .MuiChip-label': { px: 0 },
+                        }}
+                      />
+                    ))}
+                  </Stack>
+                ) : null}
                 <Divider sx={{ my: 0.5, width: '90%' }} />
                 <Stack spacing={0.75} sx={{ width: '100%', alignItems: 'center' }}>
                   <Button
@@ -1362,6 +1446,7 @@ export const StructureEvidenceEditor = forwardRef<
                     const ox = (-dy / len) * 5;
                     const oy = (dx / len) * 5;
                     const offsets = bond.order === 1 ? [0] : bond.order === 2 ? [-1, 1] : [-1.6, 0, 1.6];
+                    const stereoWidth = 12;
                     return (
                       <g
                         key={bond.id}
@@ -1380,18 +1465,44 @@ export const StructureEvidenceEditor = forwardRef<
                           strokeLinecap="round"
                           strokeWidth="18"
                         />
-                        {offsets.map((offset) => (
-                          <line
-                            key={offset}
-                            x1={from.x + ox * offset}
-                            y1={from.y + oy * offset}
-                            x2={to.x + ox * offset}
-                            y2={to.y + oy * offset}
-                            stroke={active ? '#2958ff' : '#475569'}
-                            strokeLinecap="round"
-                            strokeWidth={active ? 4.5 : 3}
+                        {bond.order === 1 && bond.stereo === 'up' ? (
+                          <polygon
+                            points={`${from.x},${from.y} ${to.x + ox * stereoWidth / 5},${to.y + oy * stereoWidth / 5} ${to.x - ox * stereoWidth / 5},${to.y - oy * stereoWidth / 5}`}
+                            fill={active ? '#2958ff' : '#475569'}
                           />
-                        ))}
+                        ) : bond.order === 1 && bond.stereo === 'down' ? (
+                          Array.from({ length: 7 }).map((_, dashIndex) => {
+                            const t = 0.16 + dashIndex * 0.11;
+                            const width = 1.5 + dashIndex * 1.6;
+                            const cx = from.x + dx * t;
+                            const cy = from.y + dy * t;
+                            return (
+                              <line
+                                key={dashIndex}
+                                x1={cx - (ox / 5) * width}
+                                y1={cy - (oy / 5) * width}
+                                x2={cx + (ox / 5) * width}
+                                y2={cy + (oy / 5) * width}
+                                stroke={active ? '#2958ff' : '#475569'}
+                                strokeLinecap="round"
+                                strokeWidth={active ? 3.5 : 2.5}
+                              />
+                            );
+                          })
+                        ) : (
+                          offsets.map((offset) => (
+                            <line
+                              key={offset}
+                              x1={from.x + ox * offset}
+                              y1={from.y + oy * offset}
+                              x2={to.x + ox * offset}
+                              y2={to.y + oy * offset}
+                              stroke={active ? '#2958ff' : '#475569'}
+                              strokeLinecap="round"
+                              strokeWidth={active ? 4.5 : 3}
+                            />
+                          ))
+                        )}
                       </g>
                     );
                   })}
@@ -1435,6 +1546,19 @@ export const StructureEvidenceEditor = forwardRef<
                         >
                           {atom.element}
                         </text>
+                        {atom.charge ? (
+                          <text
+                            x={atom.x + 15}
+                            y={atom.y - 11}
+                            textAnchor="middle"
+                            fontFamily='"Space Grotesk", "Segoe UI", sans-serif'
+                            fontSize="11"
+                            fontWeight="900"
+                            fill={hasContrib ? '#0f172a' : getAtomTextColor(atom.element)}
+                          >
+                            {formatAtomCharge(atom.charge)}
+                          </text>
+                        ) : null}
                       </g>
                     );
                   })}
