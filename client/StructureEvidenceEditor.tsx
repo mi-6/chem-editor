@@ -6,6 +6,7 @@ import RestartAltRoundedIcon from '@mui/icons-material/RestartAltRounded';
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
 import { Alert, Box, Button, Chip, Divider, Stack, TextField, Typography } from '@mui/material';
 
+import { sanitizeSvg } from '@/lib/sanitize';
 import { moleculeService } from '@/services/moleculeService';
 import { sketchFromSmiles } from '@/services/smilesSketch';
 import { getApiErrorMessage } from '@/utils/apiError';
@@ -447,6 +448,7 @@ export const StructureEvidenceEditor = forwardRef<
   const [fragmentStatus, setFragmentStatus] = useState<string | null>(null);
   const [fragmentBusyId, setFragmentBusyId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [structurePreviewSvg, setStructurePreviewSvg] = useState<string | null>(structureSvg);
   const panStartRef = useRef<{ clientX: number; clientY: number; offsetX: number; offsetY: number } | null>(null);
   const didPanRef = useRef(false);
   const sketchMolfile = useMemo(
@@ -473,6 +475,7 @@ export const StructureEvidenceEditor = forwardRef<
   );
   const displayHighlightPreview =
     normalizedFragmentQuery && hasCurrentStructure ? highlightPreview : null;
+  const authoritativeSvg = displayHighlightPreview?.atomContributionSvg || displayHighlightPreview?.svg || structurePreviewSvg;
 
   const projectToCanvas = useCallback((point: { x: number; y: number }) => ({
     x: (point.x - canvasOffset.x) / canvasScale,
@@ -579,6 +582,10 @@ export const StructureEvidenceEditor = forwardRef<
     void loadStructure(acceptedSmiles);
   }, [acceptedSmiles]);
 
+  useEffect(() => {
+    setStructurePreviewSvg(structureSvg);
+  }, [structureSvg]);
+
   const analyzePayload = async (payload: StructurePayload) => {
     const normalized = normalizePayload(payload);
     const analysis = await moleculeService.analyzeWorkspace(normalized);
@@ -634,6 +641,7 @@ export const StructureEvidenceEditor = forwardRef<
     if (!cleaned) {
       setCurrentPayload({ smiles: '', molfile: '' });
       setHighlightPreview(null);
+      setStructurePreviewSvg(null);
       return;
     }
 
@@ -644,6 +652,7 @@ export const StructureEvidenceEditor = forwardRef<
     try {
       const analyzed = await analyzePayload(payload);
       setCurrentPayload(analyzed.payload);
+      setStructurePreviewSvg(analyzed.svg);
       if (analyzed.payload.molfile) {
         loadSketchFromMolfile(analyzed.payload.molfile);
       } else {
@@ -651,6 +660,7 @@ export const StructureEvidenceEditor = forwardRef<
       }
     } catch {
       setCurrentPayload(payload);
+      setStructurePreviewSvg(null);
       if (payload.molfile) {
         loadSketchFromMolfile(payload.molfile);
       } else {
@@ -662,6 +672,7 @@ export const StructureEvidenceEditor = forwardRef<
   const clear = async () => {
     setCurrentPayload({ smiles: '', molfile: '' });
     setHighlightPreview(null);
+    setStructurePreviewSvg(null);
     setFragmentInput('CCO');
     setSketchAtoms([]);
     setSketchBonds([]);
@@ -697,6 +708,7 @@ export const StructureEvidenceEditor = forwardRef<
     try {
       const analyzed = await analyzePayload({ smiles: '', molfile: sketchMolfile });
       setCurrentPayload({ smiles: analyzed.payload.smiles, molfile: '' });
+      setStructurePreviewSvg(analyzed.svg);
       setSketchDirty(false);
       setSelectedBondId(null);
       await onSyncStructure?.({ smiles: analyzed.payload.smiles, molfile: sketchMolfile });
@@ -717,6 +729,7 @@ export const StructureEvidenceEditor = forwardRef<
           setSketchAtoms((current) =>
             current.map((a) => (a.id === hitAtom.id ? { ...a, element: selectedElement } : a)),
           );
+          setStructurePreviewSvg(null);
           setSketchDirty(true);
         } else {
           setSelectedAtomId(null);
@@ -741,6 +754,7 @@ export const StructureEvidenceEditor = forwardRef<
               to: hitAtom.id,
             },
           ]);
+          setStructurePreviewSvg(null);
           setSketchDirty(true);
           setSelectedBondId(null);
         }
@@ -759,6 +773,7 @@ export const StructureEvidenceEditor = forwardRef<
         y: point.y,
       },
     ]);
+    setStructurePreviewSvg(null);
     setSketchDirty(true);
 
     if (selectedAtomId) {
@@ -772,6 +787,7 @@ export const StructureEvidenceEditor = forwardRef<
           to: nextAtomId,
         },
       ]);
+      setStructurePreviewSvg(null);
     }
     setSelectedAtomId(nextAtomId);
     setSelectedBondId(null);
@@ -786,6 +802,7 @@ export const StructureEvidenceEditor = forwardRef<
     setSketchBonds((current) =>
       current.filter((bond) => bond.from !== selectedAtomId && bond.to !== selectedAtomId),
     );
+    setStructurePreviewSvg(null);
     setSelectedAtomId(null);
     setSelectedBondId(null);
     setSketchDirty(true);
@@ -1302,6 +1319,14 @@ export const StructureEvidenceEditor = forwardRef<
                   </Button>
                 </Stack>
               </Box>
+
+              {authoritativeSvg ? (
+                <Box
+                  aria-label="RDKit structure preview"
+                  dangerouslySetInnerHTML={{ __html: sanitizeSvg(authoritativeSvg) }}
+                  sx={rdkitPreviewOverlaySx}
+                />
+              ) : null}
 
                 <svg
                   viewBox="0 0 840 640"
@@ -1866,6 +1891,23 @@ const fragmentStatusSx = {
   lineHeight: 1.4,
   fontWeight: 600,
   fontSize: '0.8rem',
+} as const;
+
+const rdkitPreviewOverlaySx = {
+  alignItems: 'center',
+  backgroundColor: '#ffffff',
+  display: 'flex',
+  inset: 0,
+  justifyContent: 'center',
+  pointerEvents: 'none',
+  position: 'absolute',
+  zIndex: 1,
+  '& svg': {
+    height: '100%',
+    maxHeight: 'calc(100% - 28px)',
+    maxWidth: 'calc(100% - 88px)',
+    width: '100%',
+  },
 } as const;
 
 const zoomControlsSx = {
